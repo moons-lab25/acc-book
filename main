@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>가계부 애플리케이션 (구글 시트 연동)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google API 로더 스크립트 -->
+    <script>
+        // 이 함수들은 전역 스코프에 정의되어 <script> 태그의 onload에서 즉시 호출될 수 있습니다.
+        // 호출된 후에는 모듈 스크립트가 수신할 수 있는 커스텀 이벤트를 발생시킵니다.
+        function gapiLoaded() { window.dispatchEvent(new CustomEvent('gapi-loaded')); }
+        function gisLoaded() { window.dispatchEvent(new CustomEvent('gis-loaded')); }
+    </script>
+    <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+    <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .tab-button.active {
+            border-bottom-color: #3b82f6;
+            color: #3b82f6;
+            font-weight: 600;
+        }
+        #auth-container button {
+            transition: background-color 0.3s, box-shadow 0.3s;
+        }
+        #auth-container button:hover {
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div id="app" class="container mx-auto max-w-4xl p-4">
+        
+        <header class="bg-white shadow-md rounded-lg p-6 mb-6">
+            <div class="flex justify-between items-start">
+                <div>
+                    <h1 class="text-3xl font-bold text-blue-600">나의 스마트 가계부</h1>
+                    <p class="text-gray-500 mt-1">지출을 스마트하게 관리하고 절약 습관을 길러보세요.</p>
+                </div>
+                <!-- 구글 로그인/로그아웃 버튼 및 시트 링크 -->
+                <div id="auth-container" class="text-right">
+                    <button id="authorize_button" class="hidden bg-white border border-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg inline-flex items-center">
+                        <img src="https://developers.google.com/identity/images/g-logo.png" alt="Google logo" class="w-5 h-5 mr-2">
+                        <span>Google 계정으로 로그인</span>
+                    </button>
+                    <div id="user-info" class="hidden">
+                        <p id="user-name" class="text-sm font-semibold"></p>
+                        <a id="sheet-link" href="#" target="_blank" class="text-sm text-blue-600 hover:underline">연동된 구글 시트 열기 <i class="fas fa-external-link-alt ml-1"></i></a>
+                        <button id="signout_button" class="mt-2 bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-1 px-3 rounded-full">
+                            로그아웃
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- 경고 메시지: 로그인 필요 -->
+        <div id="login-required-message" class="hidden bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-6 rounded-lg" role="alert">
+            <p class="font-bold">로그인 필요</p>
+            <p>가계부 사용을 위해 Google 계정으로 로그인해주세요.</p>
+        </div>
+
+        <div id="main-content" class="hidden">
+            <!-- 지출 입력 폼 -->
+            <div class="bg-white shadow-md rounded-lg p-6 mb-6">
+                <h2 class="text-xl font-semibold mb-4 border-b pb-2">지출 내역 추가</h2>
+                <form id="expense-form" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="lg:col-span-1">
+                        <label for="date" class="block text-sm font-medium text-gray-700">날짜</label>
+                        <input type="date" id="date" required class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label for="description" class="block text-sm font-medium text-gray-700">내용</label>
+                        <input type="text" id="description" placeholder="예: 점심 식사" required class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label for="amount" class="block text-sm font-medium text-gray-700">금액 (원)</label>
+                        <input type="number" id="amount" placeholder="10000" required class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label for="payment-method" class="block text-sm font-medium text-gray-700">결제 수단</label>
+                        <select id="payment-method" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"></select>
+                    </div>
+                    <div>
+                        <label for="category" class="block text-sm font-medium text-gray-700">카테고리</label>
+                        <select id="category" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"></select>
+                    </div>
+                     <div class="flex items-end">
+                        <div class="w-full">
+                            <label class="block text-sm font-medium text-gray-700">비용 유형</label>
+                            <div class="mt-2 flex gap-4">
+                                <label class="inline-flex items-center">
+                                    <input type="radio" name="expense-type" value="variable" checked class="form-radio text-blue-600">
+                                    <span class="ml-2">변동비</span>
+                                </label>
+                                <label class="inline-flex items-center">
+                                    <input type="radio" name="expense-type" value="fixed" class="form-radio text-blue-600">
+                                    <span class="ml-2">고정비</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="md:col-span-2 lg:col-span-3">
+                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition duration-300">
+                            <i class="fas fa-plus mr-2"></i>추가하기
+                        </button>
+                    </div>
+                </form>
+            </div>
+            
+            <!-- 내역 조회 및 결산 -->
+            <div class="bg-white shadow-md rounded-lg p-6">
+                 <div class="border-b border-gray-200">
+                    <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+                        <button id="daily-tab" class="tab-button whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 active">일별 내역</button>
+                        <button id="weekly-tab" class="tab-button whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">주별 결산</button>
+                        <button id="monthly-tab" class="tab-button whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">월별 결산</button>
+                    </nav>
+                </div>
+
+                <!-- 일별 내역 -->
+                <div id="daily-view">
+                    <div class="flex justify-between items-center mt-4">
+                        <h3 class="text-lg font-semibold">지출 내역</h3>
+                        <input type="date" id="filter-date" class="px-2 py-1 bg-white border border-gray-300 rounded-md shadow-sm text-sm">
+                    </div>
+                    <div class="mt-4 flow-root">
+                        <div class="inline-block min-w-full py-2 align-middle">
+                            <table class="min-w-full divide-y divide-gray-300">
+                                <thead>
+                                    <tr>
+                                        <th scope="col" class="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-0">내용</th>
+                                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">금액</th>
+                                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">결제수단</th>
+                                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">카테고리</th>
+                                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">유형</th>
+                                        <th scope="col" class="relative py-3.5 pl-3 pr-4 sm:pr-0"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="transactions-list" class="divide-y divide-gray-200"></tbody>
+                            </table>
+                            <p id="no-daily-data" class="text-center text-gray-500 py-8">해당 날짜의 지출 내역이 없습니다.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 주별 결산 -->
+                <div id="weekly-view" class="hidden">
+                    <div class="flex justify-between items-center mt-4">
+                        <h3 class="text-lg font-semibold">이번 주 결산</h3>
+                        <p id="weekly-period" class="text-sm text-gray-600"></p>
+                    </div>
+                    <div id="weekly-summary" class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                    <p id="no-weekly-data" class="text-center text-gray-500 py-8 hidden">이번 주 지출 내역이 없습니다.</p>
+                </div>
+
+                <!-- 월별 결산 -->
+                <div id="monthly-view" class="hidden">
+                     <div class="flex justify-between items-center mt-4">
+                        <h3 class="text-lg font-semibold">월별 결산</h3>
+                         <input type="month" id="filter-month" class="px-2 py-1 bg-white border border-gray-300 rounded-md shadow-sm text-sm">
+                    </div>
+                    <div id="monthly-summary" class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                     <p id="no-monthly-data" class="text-center text-gray-500 py-8 hidden">해당 월의 지출 내역이 없습니다.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="toast" class="fixed bottom-5 right-5 bg-green-500 text-white py-2 px-4 rounded-lg shadow-lg opacity-0 transition-opacity duration-300">
+        <p id="toast-message"></p>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, doc, deleteDoc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- ⚠️ 중요 설정: Google Cloud Console에서 발급받은 값을 입력해주세요 ---
+        // 1. Google Cloud Platform(https://console.cloud.google.com/)에서 프로젝트 생성
+        // 2. 'API 및 서비스' > '사용자 인증 정보'에서 OAuth 2.0 클라이언트 ID 생성 (웹 애플리케이션 유형)
+        // 3. '승인된 자바스크립트 원본'에 현재 페이지의 URL(예: http://localhost:8080) 추가
+        // 4. 'API 및 서비스' > '라이브러리'에서 Google Sheets API, Google Drive API를 '사용 설정'
+        // 5. 'API 및 서비스' > '사용자 인증 정보'에서 API 키 생성
+        const API_KEY = "AIzaSyB5K-73kkaQRCKSAlhnrC7SOcARMnLm_Vg"; // 여기에 API 키를 입력하세요.
+        const CLIENT_ID = ""; // 여기에 OAuth 2.0 클라이언트 ID를 입력하세요.
+        // --------------------------------------------------------------------
+        
+        const DISCOVERY_DOC = "https://sheets.googleapis.com/$discovery/rest?version=v4";
+        const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file";
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        
+        let app, db, auth, userId, transactions = [], unsubscribe = null;
+        let tokenClient, gapiInited = false, gisInited = false, spreadsheetId = null;
+
+        const PAYMENT_METHODS = ["현금", "신용카드", "체크카드", "지역화폐", "포인트"];
+        const CATEGORIES = ["식비", "교통", "통신", "주거", "생활용품", "의료/건강", "문화/여가", "교육", "경조사", "금융", "기타"];
+
+        const authButton = document.getElementById('authorize_button');
+        const signoutButton = document.getElementById('signout_button');
+        const mainContent = document.getElementById('main-content');
+        const loginRequiredMessage = document.getElementById('login-required-message');
+
+        window.addEventListener('gapi-loaded', () => {
+            gapi.load('client', initializeGapiClient);
+        });
+
+        window.addEventListener('gis-loaded', () => {
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: CLIENT_ID,
+                scope: SCOPES,
+                callback: '', // 비워두고, 필요 시 동적으로 설정
+            });
+            gisInited = true;
+            maybeEnableButtons();
+        });
+
+
+        async function initializeGapiClient() {
+            await gapi.client.init({ apiKey: API_KEY, discoveryDocs: [DISCOVERY_DOC] });
+            gapiInited = true;
+            maybeEnableButtons();
+        }
+
+        function maybeEnableButtons() {
+            if (gapiInited && gisInited) {
+                authButton.classList.remove('hidden');
+                loginRequiredMessage.classList.remove('hidden');
+            }
+        }
+
+        authButton.onclick = () => {
+            tokenClient.callback = async (resp) => {
+                if (resp.error !== undefined) { throw (resp); }
+                gapi.client.setToken(resp);
+                await updateSigninStatus(true);
+            };
+            if (gapi.client.getToken() === null) {
+                tokenClient.requestAccessToken({prompt: 'consent'});
+            } else {
+                tokenClient.requestAccessToken({prompt: ''});
+            }
+        };
+
+        signoutButton.onclick = () => {
+            const token = gapi.client.getToken();
+            if (token !== null) {
+                google.accounts.oauth2.revoke(token.access_token, () => {
+                    gapi.client.setToken('');
+                    updateSigninStatus(false);
+                });
+            }
+        };
+
+        async function updateSigninStatus(isSignedIn) {
+            if (isSignedIn) {
+                authButton.classList.add('hidden');
+                loginRequiredMessage.classList.add('hidden');
+                mainContent.classList.remove('hidden');
+                document.getElementById('user-info').classList.remove('hidden');
+                const profile = await gapi.client.oauth2.userinfo.get();
+                document.getElementById('user-name').textContent = `안녕하세요, ${profile.result.name}님`;
+                userId = profile.result.id;
+                await findOrCreateSheet();
+                listenToTransactions();
+            } else {
+                authButton.classList.remove('hidden');
+                loginRequiredMessage.classList.remove('hidden');
+                mainContent.classList.add('hidden');
+                document.getElementById('user-info').classList.add('hidden');
+                if (unsubscribe) unsubscribe();
+                transactions = [];
+                spreadsheetId = null;
+                userId = null;
+            }
+        }
+        
+        async function findOrCreateSheet() {
+            const settingsRef = doc(db, `artifacts/${appId}/users/${userId}/settings`, 'googleSheet');
+            const docSnap = await getDoc(settingsRef);
+
+            if (docSnap.exists() && docSnap.data().spreadsheetId) {
+                spreadsheetId = docSnap.data().spreadsheetId;
+                console.log("Found existing spreadsheet:", spreadsheetId);
+            } else {
+                console.log("No spreadsheet found, creating a new one...");
+                try {
+                    const response = await gapi.client.sheets.spreadsheets.create({
+                        properties: { title: "나의 스마트 가계부" }
+                    });
+                    spreadsheetId = response.result.spreadsheetId;
+                    console.log("Created new spreadsheet:", spreadsheetId);
+                    await setDoc(settingsRef, { spreadsheetId: spreadsheetId });
+                    
+                    // 헤더 추가
+                    const headerRange = 'A1:G1';
+                    const values = [["날짜", "내용", "금액", "결제수단", "카테고리", "유형", "Firestore ID"]];
+                    await gapi.client.sheets.spreadsheets.values.update({
+                        spreadsheetId: spreadsheetId,
+                        range: headerRange,
+                        valueInputOption: 'USER_ENTERED',
+                        resource: { values: values }
+                    });
+
+                } catch (e) {
+                    console.error("Error creating sheet: ", e);
+                    showToast("구글 시트 생성에 실패했습니다.");
+                    return;
+                }
+            }
+            document.getElementById('sheet-link').href = `https://docs.google.com/spreadsheets/d/${spreadsheetId}`;
+        }
+
+        const expenseForm = document.getElementById('expense-form');
+        const dateInput = document.getElementById('date');
+        const filterDateInput = document.getElementById('filter-date');
+        const filterMonthInput = document.getElementById('filter-month');
+        const paymentMethodSelect = document.getElementById('payment-method');
+        const categorySelect = document.getElementById('category');
+        const transactionsList = document.getElementById('transactions-list');
+        const toast = document.getElementById('toast');
+        const toastMessage = document.getElementById('toast-message');
+
+        const tabs = { daily: document.getElementById('daily-tab'), weekly: document.getElementById('weekly-tab'), monthly: document.getElementById('monthly-tab') };
+        const views = { daily: document.getElementById('daily-view'), weekly: document.getElementById('weekly-view'), monthly: document.getElementById('monthly-view') };
+
+        const formatDate = (date) => date.toISOString().split('T')[0];
+        const formatCurrency = (amount) => `${Number(amount).toLocaleString()}원`;
+        
+        const showToast = (message) => {
+            toastMessage.textContent = message;
+            toast.classList.remove('opacity-0');
+            setTimeout(() => { toast.classList.add('opacity-0'); }, 3000);
+        };
+
+        const setupSelectOptions = (selectElement, options) => {
+            options.forEach(option => {
+                const opt = document.createElement('option');
+                opt.value = option;
+                opt.textContent = option;
+                selectElement.appendChild(opt);
+            });
+        };
+
+        const switchTab = (tabName) => {
+            Object.values(tabs).forEach(tab => tab.classList.remove('active'));
+            Object.values(views).forEach(view => view.classList.add('hidden'));
+            tabs[tabName].classList.add('active');
+            views[tabName].classList.remove('hidden');
+            if (tabName === 'daily') renderDailyView(filterDateInput.value);
+            if (tabName === 'weekly') renderWeeklyView();
+            if (tabName === 'monthly') renderMonthlyView(filterMonthInput.value);
+        };
+        
+        Object.keys(tabs).forEach(tabName => { tabs[tabName].addEventListener('click', () => switchTab(tabName)); });
+
+        const renderDailyView = (dateStr) => {
+            transactionsList.innerHTML = '';
+            const filtered = transactions.filter(t => t.date === dateStr).sort((a, b) => b.createdAt?.toMillis() - a.createdAt?.toMillis());
+            document.getElementById('no-daily-data').style.display = filtered.length === 0 ? 'block' : 'none';
+            filtered.forEach(t => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-0">${t.description}</td>
+                    <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">${formatCurrency(t.amount)}</td>
+                    <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">${t.paymentMethod}</td>
+                    <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">${t.category}</td>
+                    <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">${t.type === 'fixed' ? '고정비' : '변동비'}</td>
+                    <td class="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-0">
+                        <button data-id="${t.id}" class="delete-btn text-red-600 hover:text-red-900"><i class="fas fa-trash"></i></button>
+                    </td>
+                `;
+                transactionsList.appendChild(row);
+            });
+            document.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const id = e.currentTarget.getAttribute('data-id');
+                    if (confirm('정말로 이 내역을 삭제하시겠습니까?\n(구글 시트에서도 해당 내용이 삭제됩니다)')) {
+                        await deleteTransaction(id);
+                    }
+                });
+            });
+        };
+
+        const createSummaryCard = (title, data) => {
+            const card = document.createElement('div');
+            card.className = 'bg-gray-50 p-4 rounded-lg';
+            let content = `<h4 class="font-semibold text-md mb-2">${title}</h4><ul class="space-y-1 text-sm">`;
+            Object.entries(data).forEach(([key, value]) => {
+                content += `<li class="flex justify-between"><span>${key}</span><span class="font-medium">${formatCurrency(value)}</span></li>`;
+            });
+            card.innerHTML = content + '</ul>';
+            return card;
+        };
+        
+        const renderWeeklyView = () => {
+            const weeklySummary = document.getElementById('weekly-summary');
+            const weeklyPeriod = document.getElementById('weekly-period');
+            const noWeeklyData = document.getElementById('no-weekly-data');
+            weeklySummary.innerHTML = '';
+
+            const today = new Date();
+            const dayOfWeek = today.getDay(); // 0 (Sun) - 6 (Sat)
+            const startOfWeek = new Date(today);
+            startOfWeek.setDate(today.getDate() - dayOfWeek);
+            startOfWeek.setHours(0, 0, 0, 0); 
+
+            const endOfWeek = new Date(startOfWeek);
+            endOfWeek.setDate(startOfWeek.getDate() + 6);
+            endOfWeek.setHours(23, 59, 59, 999);
+            
+            weeklyPeriod.textContent = `${formatDate(startOfWeek)} ~ ${formatDate(endOfWeek)}`;
+
+            const weeklyTransactions = transactions.filter(t => {
+                const tDate = new Date(t.date);
+                return tDate >= startOfWeek && tDate <= endOfWeek;
+            });
+
+            if (weeklyTransactions.length === 0) {
+                 noWeeklyData.classList.remove('hidden');
+                 weeklySummary.classList.add('hidden');
+                 return;
+            }
+            noWeeklyData.classList.add('hidden');
+            weeklySummary.classList.remove('hidden');
+
+            const paymentSummary = weeklyTransactions.reduce((acc, t) => {
+                acc[t.paymentMethod] = (acc[t.paymentMethod] || 0) + t.amount;
+                return acc;
+            }, {});
+
+            const currentMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+            const monthlyCumulative = transactions
+                .filter(t => new Date(t.date) >= currentMonthStart)
+                .reduce((sum, t) => sum + t.amount, 0);
+
+            const totalWeeklySpending = weeklyTransactions.reduce((sum, t) => sum + t.amount, 0);
+            
+            const totalCard = createSummaryCard('이번 주 총 지출', { '총액': totalWeeklySpending });
+            weeklySummary.appendChild(totalCard);
+
+            const paymentCard = createSummaryCard('결제 수단별 지출', paymentSummary);
+            weeklySummary.appendChild(paymentCard);
+
+            const cumulativeCard = createSummaryCard('월 누적 지출', { '이번 달 누적': monthlyCumulative });
+            weeklySummary.appendChild(cumulativeCard);
+        };
+
+        const renderMonthlyView = (monthStr) => {
+            const monthlySummary = document.getElementById('monthly-summary');
+            const noMonthlyData = document.getElementById('no-monthly-data');
+            monthlySummary.innerHTML = '';
+
+            const monthlyTransactions = transactions.filter(t => t.date.startsWith(monthStr));
+
+            if (monthlyTransactions.length === 0) {
+                noMonthlyData.classList.remove('hidden');
+                monthlySummary.classList.add('hidden');
+                return;
+            }
+            noMonthlyData.classList.add('hidden');
+            monthlySummary.classList.remove('hidden');
+
+            const paymentSummary = monthlyTransactions.reduce((acc, t) => {
+                acc[t.paymentMethod] = (acc[t.paymentMethod] || 0) + t.amount;
+                return acc;
+            }, {});
+
+            const categorySummary = monthlyTransactions.reduce((acc, t) => {
+                acc[t.category] = (acc[t.category] || 0) + t.amount;
+                return acc;
+            }, {});
+            
+            const typeSummary = monthlyTransactions.reduce((acc, t) => {
+                const typeName = t.type === 'fixed' ? '고정비' : '변동비';
+                acc[typeName] = (acc[typeName] || 0) + t.amount;
+                return acc;
+            }, {});
+            
+            const totalMonthlySpending = monthlyTransactions.reduce((sum, t) => sum + t.amount, 0);
+            
+            const totalCard = createSummaryCard('이번 달 총 지출', { '총액': totalMonthlySpending });
+            monthlySummary.appendChild(totalCard);
+
+            const paymentCard = createSummaryCard('결제 수단별 지출', paymentSummary);
+            monthlySummary.appendChild(paymentCard);
+            
+            const categoryCard = createSummaryCard('카테고리별 지출', categorySummary);
+            monthlySummary.appendChild(categoryCard);
+
+            const typeCard = createSummaryCard('비용 유형별 지출', typeSummary);
+            monthlySummary.appendChild(typeCard);
+        };
+
+        const addTransaction = async (data) => {
+            if (!spreadsheetId) { showToast("구글 시트가 준비되지 않았습니다."); return; }
+            try {
+                // 1. 구글 시트에 먼저 추가
+                const values = [[ data.date, data.description, data.amount, data.paymentMethod, data.category, data.type === 'fixed' ? '고정비' : '변동비', '']];
+                const appendResponse = await gapi.client.sheets.spreadsheets.values.append({
+                    spreadsheetId: spreadsheetId,
+                    range: 'A:G',
+                    valueInputOption: 'USER_ENTERED',
+                    insertDataOption: 'INSERT_ROWS',
+                    resource: { values: values }
+                });
+                
+                // 2. Firestore에 저장 (구글 시트의 ID 포함)
+                const transactionsCol = collection(db, `artifacts/${appId}/users/${userId}/transactions`);
+                const docRef = await addDoc(transactionsCol, { ...data, createdAt: serverTimestamp() });
+
+                // 3. 구글 시트에 Firestore ID 업데이트
+                const updatedRange = appendResponse.result.updates.updatedRange;
+                const cellToUpdate = updatedRange.replace(/A(\d+):.*/, 'G$1');
+                await gapi.client.sheets.spreadsheets.values.update({
+                    spreadsheetId: spreadsheetId,
+                    range: cellToUpdate,
+                    valueInputOption: 'USER_ENTERED',
+                    resource: { values: [[docRef.id]] }
+                });
+
+                showToast('지출 내역이 추가되었습니다.');
+                expenseForm.reset();
+                dateInput.value = formatDate(new Date());
+
+            } catch (error) {
+                console.error("Error adding transaction: ", error);
+                showToast('오류가 발생했습니다.');
+            }
+        };
+        
+        const deleteTransaction = async (id) => {
+            if (!spreadsheetId) { showToast("구글 시트가 준비되지 않았습니다."); return; }
+            try {
+                // 1. 구글 시트에서 해당 행 찾기 및 삭제
+                // Firestore ID를 기준으로 시트에서 행을 검색합니다.
+                const findResponse = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: spreadsheetId,
+                    range: 'G:G' // Firestore ID가 저장된 G열
+                });
+                
+                const rows = findResponse.result.values;
+                let rowIndex = -1;
+                if (rows) {
+                    rowIndex = rows.findIndex(row => row[0] === id);
+                }
+
+                if (rowIndex !== -1) {
+                    // 행을 삭제하는 대신 내용을 비웁니다. (행 삭제는 복잡성을 증가시킬 수 있음)
+                    await gapi.client.sheets.spreadsheets.values.clear({
+                        spreadsheetId: spreadsheetId,
+                        range: `A${rowIndex + 1}:G${rowIndex + 1}`
+                    });
+                } else {
+                    console.warn("Could not find row in Google Sheet to delete.");
+                }
+
+                // 2. Firestore에서 문서 삭제
+                await deleteDoc(doc(db, `artifacts/${appId}/users/${userId}/transactions`, id));
+
+                showToast('삭제되었습니다.');
+            } catch (error) {
+                console.error("Error deleting document: ", error);
+                showToast('삭제 중 오류가 발생했습니다.');
+            }
+        };
+
+        const listenToTransactions = () => {
+            if (unsubscribe) unsubscribe();
+            const q = query(collection(db, `artifacts/${appId}/users/${userId}/transactions`));
+            unsubscribe = onSnapshot(q, (snapshot) => {
+                transactions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                if (tabs.daily.classList.contains('active')) renderDailyView(filterDateInput.value);
+                if (tabs.weekly.classList.contains('active')) renderWeeklyView();
+                if (tabs.monthly.classList.contains('active')) renderMonthlyView(filterMonthInput.value);
+            });
+        };
+        
+        expenseForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            addTransaction({
+                date: dateInput.value,
+                description: document.getElementById('description').value,
+                amount: parseInt(document.getElementById('amount').value),
+                paymentMethod: paymentMethodSelect.value,
+                category: categorySelect.value,
+                type: document.querySelector('input[name="expense-type"]:checked').value,
+            });
+        });
+
+        filterDateInput.addEventListener('change', (e) => renderDailyView(e.target.value));
+        filterMonthInput.addEventListener('change', (e) => renderMonthlyView(e.target.value));
+
+        const initialize = () => {
+             if (!CLIENT_ID || !API_KEY) {
+                document.getElementById('app').innerHTML = `<div class="text-center p-8 bg-red-100 text-red-700 rounded-lg"><strong>설정 필요:</strong><br>스크립트 상단의 API_KEY와 CLIENT_ID를 설정해주세요.</div>`;
+                return;
+            }
+            if (firebaseConfig.apiKey) {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+            } else {
+                console.error("Firebase config is not available.");
+            }
+            const today = new Date();
+            dateInput.value = formatDate(today);
+            filterDateInput.value = formatDate(today);
+            filterMonthInput.value = today.toISOString().slice(0, 7);
+            setupSelectOptions(paymentMethodSelect, PAYMENT_METHODS);
+            setupSelectOptions(categorySelect, CATEGORIES);
+        };
+        initialize();
+    </script>
+
+</body>
+</html>
+

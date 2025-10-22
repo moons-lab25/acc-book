@@ -191,7 +191,7 @@
         // 4. 'API 및 서비스' > '라이브러리'에서 Google Sheets API, Google Drive API를 '사용 설정'
         // 5. 'API 및 서비스' > '사용자 인증 정보'에서 API 키 생성
         const API_KEY = "AIzaSyB5K-73kkaQRCKSAlhnrC7SOcARMnLm_Vg"; // 여기에 API 키를 입력하세요.
-        const CLIENT_ID = ""; // 여기에 OAuth 2.0 클라이언트 ID를 입력하세요.
+        const CLIENT_ID = "323170303017-eaqjic73r6gebog51su5ef721le18vpu.apps.googleusercontent.com"; // 여기에 OAuth 2.0 클라이언트 ID를 입력하세요.
         // --------------------------------------------------------------------
         
         const DISCOVERY_DOC = "https://sheets.googleapis.com/$discovery/rest?version=v4";
